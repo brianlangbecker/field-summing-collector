@@ -12,7 +12,18 @@ processors:
     wait_duration: 10s
     num_traces: 100
 
-  # Filter to only process Signal/read spans from datasource-proxy service
+  # Custom processor to add field summing to spans
+  # Note: This requires a custom implementation or script
+  # For now, we'll use a simple transform to mark spans
+  transform:
+    trace_statements:
+      - context: span
+        statements:
+          # Mark spans for post-processing correlation with metrics
+          - set(attributes["field_summing_target"], true) where name == "compute.v1.ComputeEngine/getData" 
+          - set(attributes["field_summing_source"], true) where name == "data.signal.v1.Signal/read"
+
+  # Filter to only process Signal/read spans for metrics generation
   filter/signal_reads:
     spans:
       include:
@@ -38,12 +49,19 @@ connectors:
       - name: trace.trace_id
 
 exporters:
-  # Export traces with summed fields to Honeycomb
-  otlp/honeycomb:
+  # Export traces to main Honeycomb dataset
+  otlp/honeycomb_traces:
     endpoint: "https://api.honeycomb.io:443"
     headers:
       "x-honeycomb-team": "${HONEYCOMB_API_KEY}"
-      "x-honeycomb-dataset": "field-summing-traces"
+      "x-honeycomb-dataset": "traces"
+      
+  # Export metrics (including field sums) to Honeycomb metrics
+  otlp/honeycomb_metrics:
+    endpoint: "https://api.honeycomb.io:443"
+    headers:
+      "x-honeycomb-team": "${HONEYCOMB_API_KEY}"
+      "x-honeycomb-dataset": "field-summing-metrics"
       
   # Debug logging
   debug:
@@ -51,11 +69,11 @@ exporters:
 
 service:
   pipelines:
-    # Main traces pipeline - sends all traces to Honeycomb
+    # Main traces pipeline with field summing markers
     traces:
       receivers: [otlp]
-      processors: [groupbytrace, batch]
-      exporters: [otlp/honeycomb, spanmetrics]
+      processors: [groupbytrace, transform, batch]
+      exporters: [otlp/honeycomb_traces, spanmetrics]
       
     # Signal read aggregation pipeline - creates metrics from Signal/read spans  
     traces/signal_reads:
@@ -63,7 +81,7 @@ service:
       processors: [groupbytrace, filter/signal_reads]
       exporters: [spanmetrics]
       
-    # Metrics pipeline - processes summed metrics
+    # Metrics pipeline - send field summing metrics to Honeycomb
     metrics:
       receivers: [spanmetrics]
-      exporters: [debug]
+      exporters: [otlp/honeycomb_metrics, debug]

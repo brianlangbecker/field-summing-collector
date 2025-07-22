@@ -1,0 +1,54 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  groupbytrace:
+    wait_duration: 10s
+    num_traces: 100
+
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+connectors:
+  spanmetrics:
+    histogram:
+      disable: true  # Disable histograms for Honeycomb compatibility
+      unit: ms
+    dimensions:
+      - name: trace.trace_id  # Essential for correlation
+    # Generate sum metrics instead of histograms
+    exemplars:
+      enabled: false
+
+exporters:
+  otlp/honeycomb_traces:
+    endpoint: "https://api.honeycomb.io:443"
+    headers:
+      "x-honeycomb-team": "${HONEYCOMB_API_KEY}"
+      "x-honeycomb-dataset": "traces"
+      
+  otlp/honeycomb_metrics:
+    endpoint: "https://api.honeycomb.io:443"
+    headers:
+      "x-honeycomb-team": "${HONEYCOMB_API_KEY}"
+      "x-honeycomb-dataset": "field-summing-metrics"
+      
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [groupbytrace, batch]
+      exporters: [otlp/honeycomb_traces, spanmetrics]
+      
+    metrics:
+      receivers: [spanmetrics]
+      exporters: [otlp/honeycomb_metrics, debug]
