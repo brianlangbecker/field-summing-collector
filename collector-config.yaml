@@ -23,7 +23,7 @@ processors:
                 spans,
                 span.name == "data.signal.v1.Signal/read" and 
                 resource.attributes["service.name"] == "datasource-proxy",
-                duration / 1000000
+                duration_ms
               )
             )) where span.name == "compute.v1.ComputeEngine/getData" and 
                      resource.attributes["service.name"] == "appserver"
