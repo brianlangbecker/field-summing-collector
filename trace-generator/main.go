@@ -6,21 +6,21 @@ import (
 	"log"
 	"time"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/sdk/resource"
-	"go.opentelemetry.io/otel/sdk/trace"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 )
 
 func main() {
 	ctx := context.Background()
 
-	// Create OTLP HTTP exporter
-	exporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint("http://localhost:4318"),
-		otlptracehttp.WithInsecure(),
+	// Create OTLP GRPC exporter
+	exporter, err := otlptracegrpc.New(ctx,
+		otlptracegrpc.WithEndpoint("localhost:4317"),
+		otlptracegrpc.WithInsecure(),
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -48,15 +48,15 @@ func main() {
 	}
 
 	// Create trace providers for each service
-	appServerTP := trace.NewTracerProvider(
-		trace.WithBatcher(exporter),
-		trace.WithResource(appServerRes),
+	appServerTP := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(appServerRes),
 	)
 	defer appServerTP.Shutdown(ctx)
 
-	datasourceProxyTP := trace.NewTracerProvider(
-		trace.WithBatcher(exporter),
-		trace.WithResource(datasourceProxyRes),
+	datasourceProxyTP := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(datasourceProxyRes),
 	)
 	defer datasourceProxyTP.Shutdown(ctx)
 

@@ -12,21 +12,13 @@ processors:
     wait_duration: 10s
     num_traces: 100
 
-  # Transform processor to implement field summing logic
+  # Transform processor to add field summing - simplified for testing
   transform:
     trace_statements:
-      - context: trace
+      - context: span
         statements:
-          # Calculate sum of Signal/read durations and add to getData spans
-          - set(attributes["summed_signal_duration_ms"], Sum(
-              Select(
-                spans,
-                span.name == "data.signal.v1.Signal/read" and 
-                resource.attributes["service.name"] == "datasource-proxy",
-                duration_ms
-              )
-            )) where span.name == "compute.v1.ComputeEngine/getData" and 
-                     resource.attributes["service.name"] == "appserver"
+          # Add marker attribute to getData spans for now
+          - set(attributes["field_summing_enabled"], true) where name == "compute.v1.ComputeEngine/getData"
 
   # Batch processor for performance
   batch:
@@ -43,12 +35,12 @@ exporters:
       "x-honeycomb-dataset": "field-summing-traces"
       
   # Debug logging
-  logging:
-    loglevel: debug
+  debug:
+    verbosity: detailed
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [groupbytrace, transform, batch]
-      exporters: [otlp/honeycomb, logging]
+      exporters: [otlp/honeycomb, debug]
