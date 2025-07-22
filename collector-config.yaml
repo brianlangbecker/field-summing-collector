@@ -12,20 +12,30 @@ processors:
     wait_duration: 10s
     num_traces: 100
 
-  # Transform processor to mark spans for field summing
-  transform:
-    trace_statements:
-      - context: span
-        statements:
-          # Mark getData spans for field summing (actual summing requires custom processor)
-          - set(attributes["needs_field_summing"], true) where name == "compute.v1.ComputeEngine/getData" and attributes["service.name"] == "appserver"
-          - set(attributes["signal_read_span"], true) where name == "data.signal.v1.Signal/read" and attributes["service.name"] == "datasource-proxy"
+  # Filter to only process Signal/read spans for the sum connector
+  filter/signal_reads:
+    spans:
+      include:
+        match_type: strict
+        span_names: ["data.signal.v1.Signal/read"]
+        services: ["datasource-proxy"]
 
   # Batch processor for performance
   batch:
     timeout: 1s
     send_batch_size: 1024
     send_batch_max_size: 2048
+
+connectors:
+  # Spanmetrics connector to create metrics from Signal/read spans
+  spanmetrics:
+    histogram:
+      disable: false
+      unit: ms
+      explicit:
+        buckets: [2ms, 4ms, 6ms, 8ms, 10ms, 50ms, 100ms, 200ms, 400ms, 800ms, 1s, 1400ms, 2s, 5s, 10s, 15s]
+    dimensions:
+      - name: trace.trace_id
 
 exporters:
   # Export traces with summed fields to Honeycomb
@@ -41,7 +51,19 @@ exporters:
 
 service:
   pipelines:
+    # Main traces pipeline - sends all traces to Honeycomb
     traces:
       receivers: [otlp]
-      processors: [groupbytrace, transform, batch]
-      exporters: [otlp/honeycomb, debug]
+      processors: [groupbytrace, batch]
+      exporters: [otlp/honeycomb, spanmetrics]
+      
+    # Signal read aggregation pipeline - creates metrics from Signal/read spans  
+    traces/signal_reads:
+      receivers: [otlp]
+      processors: [groupbytrace, filter/signal_reads]
+      exporters: [spanmetrics]
+      
+    # Metrics pipeline - processes summed metrics
+    metrics:
+      receivers: [spanmetrics]
+      exporters: [debug]
