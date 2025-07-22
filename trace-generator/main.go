@@ -26,10 +26,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Create resource
-	res, err := resource.New(ctx,
+	// Create resources for different services
+	appServerRes, err := resource.New(ctx,
 		resource.WithAttributes(
-			semconv.ServiceNameKey.String("trace-generator"),
+			semconv.ServiceNameKey.String("appserver"),
 			semconv.ServiceVersionKey.String("1.0.0"),
 		),
 	)
@@ -37,49 +37,72 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Create trace provider
-	tp := trace.NewTracerProvider(
-		trace.WithBatcher(exporter),
-		trace.WithResource(res),
+	datasourceProxyRes, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceNameKey.String("datasource-proxy"),
+			semconv.ServiceVersionKey.String("1.0.0"),
+		),
 	)
-	defer tp.Shutdown(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	otel.SetTracerProvider(tp)
-	tracer := tp.Tracer("trace-generator")
+	// Create trace providers for each service
+	appServerTP := trace.NewTracerProvider(
+		trace.WithBatcher(exporter),
+		trace.WithResource(appServerRes),
+	)
+	defer appServerTP.Shutdown(ctx)
 
-	// Generate test traces with various field patterns for summing
-	generateTestTraces(ctx, tracer)
+	datasourceProxyTP := trace.NewTracerProvider(
+		trace.WithBatcher(exporter),
+		trace.WithResource(datasourceProxyRes),
+	)
+	defer datasourceProxyTP.Shutdown(ctx)
+
+	appServerTracer := appServerTP.Tracer("appserver")
+	datasourceProxyTracer := datasourceProxyTP.Tracer("datasource-proxy")
+
+	// Generate test traces with proper service attribution
+	generateTestTraces(ctx, appServerTracer, datasourceProxyTracer)
 }
 
-func generateTestTraces(ctx context.Context, tracer trace.Tracer) {
-	// Generate traces with numeric fields that should be summed
-	testCases := []struct {
-		name     string
-		duration time.Duration
-		count    int
-		value    float64
-	}{
-		{"fast-operation", 100 * time.Millisecond, 5, 10.5},
-		{"medium-operation", 500 * time.Millisecond, 3, 25.0},
-		{"slow-operation", 1 * time.Second, 2, 50.5},
-	}
-
-	for _, tc := range testCases {
-		for i := 0; i < tc.count; i++ {
-			_, span := tracer.Start(ctx, tc.name)
-			
-			span.SetAttributes(
-				attribute.String("operation.type", tc.name),
-				attribute.Int("operation.count", 1),
-				attribute.Float64("operation.value", tc.value),
-				attribute.Int("iteration", i+1),
+func generateTestTraces(ctx context.Context, appServerTracer, datasourceProxyTracer trace.Tracer) {
+	// Generate traces that match the expected structure:
+	// root_span (appserver) -> getData (appserver) -> Signal/read spans (datasource-proxy)
+	
+	for traceNum := 1; traceNum <= 3; traceNum++ {
+		// Create a new trace for each iteration using appserver tracer
+		rootCtx, rootSpan := appServerTracer.Start(ctx, "handle_request")
+		
+		// Create the single getData operation per trace (this is critical!)
+		getDataCtx, getDataSpan := appServerTracer.Start(rootCtx, "compute.v1.ComputeEngine/getData")
+		
+		// Create multiple Signal/read spans as descendants of getData using datasource-proxy tracer
+		numReads := 2 + traceNum // Variable number of reads per trace
+		for i := 0; i < numReads; i++ {
+			// Pass the trace context from appserver to datasource-proxy spans
+			_, readSpan := datasourceProxyTracer.Start(getDataCtx, "data.signal.v1.Signal/read")
+			readSpan.SetAttributes(
+				attribute.String("signal.id", fmt.Sprintf("signal_%d_%d", traceNum, i)),
 			)
-
-			// Simulate work
-			time.Sleep(tc.duration)
-			span.End()
+			
+			// Simulate different read durations that should be summed
+			readDuration := time.Duration(50+i*25) * time.Millisecond
+			time.Sleep(readDuration)
+			readSpan.End()
 		}
+		
+		// End getData span
+		time.Sleep(10 * time.Millisecond) // Small additional work
+		getDataSpan.End()
+		
+		// End root span
+		time.Sleep(5 * time.Millisecond)
+		rootSpan.End()
+		
+		fmt.Printf("Generated trace %d with %d Signal/read spans\n", traceNum, numReads)
 	}
-
-	fmt.Printf("Generated test traces with summing fields\n")
+	
+	fmt.Printf("Generated test traces matching field summing collector assumptions\n")
 }
