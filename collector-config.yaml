@@ -12,13 +12,14 @@ processors:
     wait_duration: 10s
     num_traces: 100
 
-  # Transform processor to add field summing - simplified for testing
+  # Transform processor to mark spans for field summing
   transform:
     trace_statements:
       - context: span
         statements:
-          # Add marker attribute to getData spans from appserver
-          - set(attributes["field_summing_enabled"], true) where name == "compute.v1.ComputeEngine/getData" and attributes["service.name"] == "appserver"
+          # Mark getData spans for field summing (actual summing requires custom processor)
+          - set(attributes["needs_field_summing"], true) where name == "compute.v1.ComputeEngine/getData" and attributes["service.name"] == "appserver"
+          - set(attributes["signal_read_span"], true) where name == "data.signal.v1.Signal/read" and attributes["service.name"] == "datasource-proxy"
 
   # Batch processor for performance
   batch:
