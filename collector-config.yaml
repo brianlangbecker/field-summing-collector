@@ -1,0 +1,72 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Filter to only process getData spans from appserver
+  filter:
+    spans:
+      include:
+        match_type: regexp
+        services: ["appserver"]
+        span_names: ["compute.v1.ComputeEngine/getData"]
+
+  # Extract duration attribute for summing
+  attributes:
+    actions:
+      - key: duration_ms
+        action: insert
+        from_attribute: duration
+      - key: service_name
+        action: insert
+        from_attribute: service.name
+
+connectors:
+  # Sum connector to aggregate duration values
+  sum:
+    # Aggregate by service and operation
+    dimensions:
+      - service.name
+      - span.name
+    # Sum the duration values
+    aggregation_temporality: cumulative
+    # Only include spans we want to sum
+    conditions:
+      - 'span.name == "compute.v1.ComputeEngine/getData"'
+      - 'resource.attributes["service.name"] == "appserver"'
+
+exporters:
+  # Export summed metrics to Honeycomb
+  otlp/metrics:
+    endpoint: "api.honeycomb.io:443"
+    headers:
+      "x-honeycomb-team": "${HONEYCOMB_API_KEY}"
+      "x-honeycomb-dataset": "summed-metrics"
+      
+  # Export original traces to Honeycomb
+  otlp/traces:
+    endpoint: "api.honeycomb.io:443"
+    headers:
+      "x-honeycomb-team": "${HONEYCOMB_API_KEY}"
+      "x-honeycomb-dataset": "traces"
+      
+  # Debug logging
+  logging:
+    loglevel: debug
+
+service:
+  pipelines:
+    # Process traces and send to sum connector
+    traces:
+      receivers: [otlp]
+      processors: [filter, attributes]
+      exporters: [sum, otlp/traces]
+      
+    # Process summed metrics
+    metrics:
+      receivers: [sum]
+      exporters: [otlp/metrics, logging]

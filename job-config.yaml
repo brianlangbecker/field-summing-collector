@@ -1,0 +1,33 @@
+trace_generator:
+  collector_endpoint: "http://localhost:4318"
+  traces_per_batch: 5
+  batch_interval: "30s"
+  total_batches: 10
+  services:
+    - name: "appserver"
+      enabled: true
+    - name: "compute" 
+      enabled: true
+    - name: "datasource-proxy"
+      enabled: true
+    - name: "series-cache"
+      enabled: true
+  
+  # Timing configurations (in milliseconds)
+  durations:
+    root_span: 6106
+    compute_getdata: 6105
+    cache_read: 1.857
+    series_cache_read: 0.8663
+    signal_read_compute: 6029
+    signal_read_proxy: 6027
+    post_request: 2.967
+    post_monitors: 2.645
+    select_queries:
+      - 0.2662
+      - 0.1667
+      - 0.1687
+
+logging:
+  level: "info"
+  format: "json"
