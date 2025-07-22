@@ -26,10 +26,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Create a single resource - we'll set service names per span
-	res, err := resource.New(ctx,
+	// Create resources for different services
+	appServerRes, err := resource.New(ctx,
 		resource.WithAttributes(
-			semconv.ServiceNameKey.String("trace-generator"),
+			semconv.ServiceNameKey.String("appserver"),
 			semconv.ServiceVersionKey.String("1.0.0"),
 		),
 	)
@@ -37,42 +37,52 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Create single trace provider
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
-		sdktrace.WithResource(res),
+	datasourceProxyRes, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceNameKey.String("datasource-proxy"),
+			semconv.ServiceVersionKey.String("1.0.0"),
+		),
 	)
-	defer tp.Shutdown(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	tracer := tp.Tracer("trace-generator")
+	// Create trace providers for each service
+	appServerTP := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(appServerRes),
+	)
+	defer appServerTP.Shutdown(ctx)
 
-	// Generate test traces with proper parent-child relationships
-	generateTestTraces(ctx, tracer)
+	datasourceProxyTP := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(datasourceProxyRes),
+	)
+	defer datasourceProxyTP.Shutdown(ctx)
+
+	appServerTracer := appServerTP.Tracer("appserver")
+	datasourceProxyTracer := datasourceProxyTP.Tracer("datasource-proxy")
+
+	// Generate test traces with proper service attribution
+	generateTestTraces(ctx, appServerTracer, datasourceProxyTracer)
 }
 
-func generateTestTraces(ctx context.Context, tracer trace.Tracer) {
+func generateTestTraces(ctx context.Context, appServerTracer, datasourceProxyTracer trace.Tracer) {
 	// Generate traces that match the expected structure:
 	// root_span (appserver) -> getData (appserver) -> Signal/read spans (datasource-proxy)
 	
 	for traceNum := 1; traceNum <= 3; traceNum++ {
-		// Create a new trace for each iteration
-		rootCtx, rootSpan := tracer.Start(ctx, "handle_request")
-		rootSpan.SetAttributes(
-			attribute.String("service.name", "appserver"),
-		)
+		// Create a new trace for each iteration using appserver tracer
+		rootCtx, rootSpan := appServerTracer.Start(ctx, "handle_request")
 		
 		// Create the single getData operation per trace (this is critical!)
-		getDataCtx, getDataSpan := tracer.Start(rootCtx, "compute.v1.ComputeEngine/getData")
-		getDataSpan.SetAttributes(
-			attribute.String("service.name", "appserver"),
-		)
+		getDataCtx, getDataSpan := appServerTracer.Start(rootCtx, "compute.v1.ComputeEngine/getData")
 		
-		// Create multiple Signal/read spans as descendants of getData
+		// Create multiple Signal/read spans as descendants of getData using datasource-proxy tracer
 		numReads := 2 + traceNum // Variable number of reads per trace
 		for i := 0; i < numReads; i++ {
-			_, readSpan := tracer.Start(getDataCtx, "data.signal.v1.Signal/read")
+			_, readSpan := datasourceProxyTracer.Start(getDataCtx, "data.signal.v1.Signal/read")
 			readSpan.SetAttributes(
-				attribute.String("service.name", "datasource-proxy"),
 				attribute.String("signal.id", fmt.Sprintf("signal_%d_%d", traceNum, i)),
 			)
 			

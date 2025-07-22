@@ -12,7 +12,7 @@ processors:
     wait_duration: 10s
     num_traces: 100
 
-  # Filter to only process Signal/read spans for the sum connector
+  # Filter to only process Signal/read spans from datasource-proxy service
   filter/signal_reads:
     spans:
       include:
