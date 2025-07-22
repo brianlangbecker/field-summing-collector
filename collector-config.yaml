@@ -17,8 +17,8 @@ processors:
     trace_statements:
       - context: span
         statements:
-          # Add marker attribute to getData spans for now
-          - set(attributes["field_summing_enabled"], true) where name == "compute.v1.ComputeEngine/getData"
+          # Add marker attribute to getData spans from appserver
+          - set(attributes["field_summing_enabled"], true) where name == "compute.v1.ComputeEngine/getData" and attributes["service.name"] == "appserver"
 
   # Batch processor for performance
   batch:
